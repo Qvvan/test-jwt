@@ -1,0 +1,56 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: backend
+    ports:
+      - "8999:8881"
+    environment:
+      - DEBUG=${DEBUG}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - PG_DSN=${PG_DSN}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+  db:
+    image: postgres:16.2
+    container_name: db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - app-network
+    ports:
+      - "5444:5432"
+
+
+  migrate:
+    image: migrate/migrate
+    command: [
+      "-path", "./migrations",
+      "-database", "${PG_DSN}",
+      "up"
+    ]
+    environment:
+      PG_DSN: ${PG_DSN}
+    volumes:
+      - ./migrations:/migrations
+    depends_on:
+      - db
+
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  pgdata:
