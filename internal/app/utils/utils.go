@@ -7,7 +7,7 @@ import (
 	"github.com/qvvan/test-jwt/internal/config"
 )
 
-var SecretKey = []byte("your-secret-key")
+var SecretKey = GetSecretKey()
 
 func GenerateAccessToken(currentIP string, userID string) (string, error) {
 	claims := jwt.MapClaims{}
@@ -17,7 +17,7 @@ func GenerateAccessToken(currentIP string, userID string) (string, error) {
 	claims["exp"] = time.Now().Add(time.Minute * 15).Unix()
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS512, claims)
-	tokenString, err := token.SignedString(SecretKey)
+	tokenString, err := token.SignedString([]byte(SecretKey)) // Приведение SecretKey к []byte
 	if err != nil {
 		return "", err
 	}
@@ -33,7 +33,7 @@ func GenerateRefreshToken(currentIP, userID string) (string, error) {
 	claims["exp"] = time.Now().Add(time.Hour * 96).Unix()
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS512, claims)
-	tokenString, err := token.SignedString(SecretKey)
+	tokenString, err := token.SignedString([]byte(SecretKey)) // Приведение SecretKey к []byte
 	if err != nil {
 		return "", err
 	}

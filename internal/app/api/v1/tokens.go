@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/qvvan/test-jwt/internal/app/utils"
-	errorDb "github.com/qvvan/test-jwt/pkg/client/postgresql/utils"
 )
 
 type TokensRequest struct {
@@ -43,29 +42,15 @@ func (m *Manager) GetTokensService(c *gin.Context) (*TokensResponse, error) {
 		return nil, NewPublicErr(err, http.StatusBadRequest)
 	}
 
-	user, err := m.factory.UserRepo.GetID(c, req.UserID)
-	if err != nil {
-		if err.Code == errorDb.PGErrUnexpectedError {
-			return nil, NewPublicErr(err, http.StatusNotFound)
-		}
-		return nil, NewPublicErr(err.Message, http.StatusInternalServerError)
-	}
-
 	currentIP := c.ClientIP()
-	accessToken, errToken := utils.GenerateAccessToken(currentIP, user.UserID)
+	accessToken, errToken := utils.GenerateAccessToken(currentIP, req.UserID)
 	if errToken != nil {
 		return nil, NewPublicErr(errToken, http.StatusInternalServerError)
 	}
 
-	refreshToken, errToken := utils.GenerateRefreshToken(currentIP, user.UserID)
+	refreshToken, errToken := utils.GenerateRefreshToken(currentIP, req.UserID)
 	if errToken != nil {
 		return nil, NewPublicErr(errToken, http.StatusInternalServerError)
-	}
-
-	user.RefreshToken = refreshToken
-
-	if err := m.factory.UserRepo.Update(c, user); err != nil {
-		return nil, NewPublicErr(err, http.StatusInternalServerError)
 	}
 
 	return &TokensResponse{
