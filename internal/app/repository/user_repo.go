@@ -1,12 +1,11 @@
 package repository
 
 import (
+	"fmt"
 	"log/slog"
 
-	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jmoiron/sqlx"
 	"github.com/qvvan/test-jwt/internal/app/models"
-	errors "github.com/qvvan/test-jwt/pkg/client/postgresql/utils"
 )
 
 const (
@@ -18,7 +17,7 @@ type UserRepo struct {
 	log *slog.Logger
 }
 
-func NewUserRepo(db *pgxpool.Pool, log *slog.Logger) *UserRepo {
+func NewUserRepo(db *sqlx.DB, log *slog.Logger) *UserRepo {
 	repo := &UserRepo{}
 	repo.db = db
 	repo.table = UsersTName
@@ -26,35 +25,24 @@ func NewUserRepo(db *pgxpool.Pool, log *slog.Logger) *UserRepo {
 	return repo
 }
 
-func (r *UserRepo) GetID(ctx *gin.Context, id string) (*models.User, *errors.CustomError) {
-	newModel := new(models.User)
-	if err := r.BaseRepo.GetID(ctx, id, newModel); err != nil {
-		r.log.Error("failed to get user", slog.Any("err", err))
-		return nil, err
-	}
-
-	return newModel, nil
-}
-
-func (r *UserRepo) Create(ctx *gin.Context, user *models.User) (*models.User, *errors.CustomError) {
-	id, err := r.BaseRepo.create(ctx, user)
+func (r *UserRepo) GetID(id string) (*models.User, error) {
+	getModel := new(models.User)
+	q, err := r.getQuery(id)
 	if err != nil {
-		r.log.Error("failed to create user", slog.Any("err", err))
 		return nil, err
 	}
-	user.UserID = id
-	return user, nil
+	if err := r.db.Get(getModel, q); err != nil {
+		return nil, fmt.Errorf("can't get user model: %w", err)
+	}
+
+	return getModel, nil
 }
 
-func (r *UserRepo) Update(ctx *gin.Context, user *models.User) error {
-	if err := r.BaseRepo.update(ctx, user, user.UserID); err != nil {
+func (r *UserRepo) Update(user *models.User) error {
+	if err := r.BaseRepo.update(user, user.ID); err != nil {
 		r.log.Error("failed to update user", slog.Any("err", err))
 		return err
 	}
 
 	return nil
-}
-
-func (r *UserRepo) Delete(user *models.User) (string, error) {
-	return "User deleted successfully", nil
 }

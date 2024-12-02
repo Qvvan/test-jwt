@@ -3,7 +3,7 @@ package repository
 import (
 	"log/slog"
 
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jmoiron/sqlx"
 )
 
 type Factory struct {
@@ -11,7 +11,7 @@ type Factory struct {
 }
 
 func NewFactory(
-	db *pgxpool.Pool,
+	db *sqlx.DB,
 	log *slog.Logger,
 ) *Factory {
 	return &Factory{

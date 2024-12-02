@@ -6,47 +6,33 @@ import (
 	"log"
 	"time"
 
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jmoiron/sqlx"
 )
 
-func NewClient(ctx context.Context, maxAttempts int, maxDelay time.Duration, dsn string) (pool *pgxpool.Pool, err error) {
-	err = DoWithAttemps(func() error {
-		attemptCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
+const defaultTimeoutSec = 30
 
-		pxCfg, err := pgxpool.ParseConfig(dsn)
-		if err != nil {
-			return fmt.Errorf("failed to parse config: %w", err)
+func NewClient(ctx context.Context, pgDSN string, maxRetries int, retryDelay time.Duration) (*sqlx.DB, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeoutSec*time.Second)
+	defer cancel()
+
+	for i := 0; i < maxRetries; i++ {
+		var err error
+		db, err := sqlx.ConnectContext(ctx, "pgx", pgDSN)
+		if err == nil {
+			log.Println("Successfully connected to database.")
+			err = db.PingContext(ctx)
+			if err == nil {
+				return db, nil
+			}
+			log.Println("Ping failed: ", err)
+			db.Close()
 		}
-
-		pool, err = pgxpool.ConnectConfig(attemptCtx, pxCfg)
-		if err != nil {
-			log.Println("failed to connect to database: ", err.Error())
-			return err
+		log.Printf("Attempt %d failed: %v. Retrying in %v...\n", i+1, err, retryDelay)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(retryDelay):
 		}
-
-		return nil
-	}, maxAttempts, maxDelay)
-
-	if err != nil {
-		return nil, fmt.Errorf("all attempts exceeded: %w", err)
 	}
-
-	log.Println("Successfully connected to PostgreSQL")
-	return pool, nil
-}
-
-func DoWithAttemps(fn func() error, maxAttempts int, maxDelay time.Duration) error {
-	var err error
-
-	for maxAttempts > 0 {
-		if err = fn(); err == nil {
-			return nil
-		}
-
-		maxAttempts--
-		time.Sleep(maxDelay)
-	}
-
-	return err
+	return nil, fmt.Errorf("failed to connect to database after %d attempts", maxRetries)
 }

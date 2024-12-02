@@ -1,12 +1,12 @@
 package v1
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/qvvan/test-jwt/internal/app/utils"
-	errorDb "github.com/qvvan/test-jwt/pkg/client/postgresql/utils"
 )
 
 type TokensRequest struct {
@@ -43,29 +43,27 @@ func (m *Manager) GetTokensService(c *gin.Context) (*TokensResponse, error) {
 		return nil, NewPublicErr(err, http.StatusBadRequest)
 	}
 
-	user, err := m.factory.UserRepo.GetID(c, req.UserID)
+	user, err := m.factory.UserRepo.GetID(req.UserID)
 	if err != nil {
-		if err.Code == errorDb.PGErrUnexpectedError {
+		if err == sql.ErrNoRows {
 			return nil, NewPublicErr(err, http.StatusNotFound)
 		}
-		return nil, NewPublicErr(err.Message, http.StatusInternalServerError)
+		return nil, err
 	}
 
 	currentIP := c.ClientIP()
-	accessToken, errToken := utils.GenerateAccessToken(currentIP, user.UserID)
+
+	accessToken, errToken := utils.GenerateAccessToken(currentIP, user.ID)
 	if errToken != nil {
-		return nil, NewPublicErr(errToken, http.StatusInternalServerError)
+		return nil, err
 	}
 
-	refreshToken, errToken := utils.GenerateRefreshToken(currentIP, user.UserID)
-	if errToken != nil {
-		return nil, NewPublicErr(errToken, http.StatusInternalServerError)
-	}
+	hashToken, refreshToken := utils.GenerateRefreshToken(currentIP, user.ID)
 
-	user.RefreshToken = refreshToken
+	user.RefreshToken = hashToken
 
-	if err := m.factory.UserRepo.Update(c, user); err != nil {
-		return nil, NewPublicErr(err, http.StatusInternalServerError)
+	if err := m.factory.UserRepo.Update(user); err != nil {
+		return nil, err
 	}
 
 	return &TokensResponse{

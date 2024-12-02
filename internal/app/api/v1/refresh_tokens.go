@@ -2,20 +2,18 @@
 package v1
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt"
 	"github.com/qvvan/test-jwt/internal/app/utils"
-	errorDb "github.com/qvvan/test-jwt/pkg/client/postgresql/utils"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type RefreshRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required,refresh_token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type RefreshResponse struct {
@@ -43,61 +41,44 @@ func (m *Manager) RefreshTokens(c *gin.Context) {
 func (m *Manager) RefreshTokensService(c *gin.Context) (*RefreshResponse, error) {
 	var req RefreshRequest
 
-	// Парсим входящие данные
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, NewPublicErr(err, http.StatusBadRequest)
 	}
 
-	currentIP := c.ClientIP()
-
-	// Парсим refresh токен
-	token, err := jwt.Parse(req.RefreshToken, func(token *jwt.Token) (interface{}, error) {
-		secretKey := []byte(utils.GetSecretKey())
-		return secretKey, nil
-	})
-	if err != nil || !token.Valid {
-		return nil, NewPublicErr(err, http.StatusUnauthorized)
+	storedIP, userID, currentHashToken, err := utils.DecodeUserData(req.RefreshToken)
+	if err != nil {
+		return nil, NewPublicErr(err, http.StatusBadRequest)
 	}
 
-	// Извлекаем данные из токена
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, NewPublicErr(err, http.StatusInternalServerError)
-	}
-
-	storedIP := claims["ip"].(string)
-	userID := claims["user_id"].(string)
-
-	user, userErr := m.factory.UserRepo.GetID(c, userID)
+	user, userErr := m.factory.UserRepo.GetID(userID)
 	if userErr != nil {
-		if userErr.Code == errorDb.PGErrUnexpectedError {
+		if userErr == sql.ErrNoRows {
 			return nil, NewPublicErr(err, http.StatusNotFound)
 		}
-		return nil, NewPublicErr(userErr.Message, http.StatusInternalServerError)
+		return nil, err
 	}
+
+	if user.RefreshToken != currentHashToken {
+		return nil, NewPublicErr(fmt.Errorf("invalid refresh token"), http.StatusUnauthorized)
+	}
+
+	currentIP := c.ClientIP()
 
 	if storedIP != currentIP {
 		m.log.Info("Здесь был бы вызван сервис отправки уведомления на почту", slog.String("stored_ip", storedIP), slog.String("current_ip", currentIP))
 	}
 
-	err = bcrypt.CompareHashAndPassword([]byte(user.RefreshToken), []byte(req.RefreshToken))
-	if err != nil {
-		return nil, NewPublicErr(fmt.Errorf("refresh token mismatch"), http.StatusUnauthorized)
-	}
-
 	newAccessToken, err := utils.GenerateAccessToken(currentIP, userID)
 	if err != nil {
-		return nil, NewPublicErr(err, http.StatusInternalServerError)
+		return nil, err
 	}
 
-	newRefreshToken, err := utils.GenerateRefreshToken(currentIP, userID)
-	if err != nil {
-		return nil, NewPublicErr(err, http.StatusInternalServerError)
-	}
+	hashToken, newRefreshToken := utils.GenerateRefreshToken(currentIP, userID)
 
-	user.RefreshToken = newRefreshToken
-	if err := m.factory.UserRepo.Update(c, user); err != nil {
-		return nil, fmt.Errorf("failed to update refresh token: %w", err)
+	user.RefreshToken = hashToken
+
+	if err := m.factory.UserRepo.Update(user); err != nil {
+		return nil, err
 	}
 
 	return &RefreshResponse{

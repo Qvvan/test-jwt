@@ -32,22 +32,6 @@ services:
     ports:
       - "5444:5432"
 
-
-  migrate:
-    image: migrate/migrate
-    command: [
-      "-path", "./migrations",
-      "-database", "${PG_DSN}",
-      "up"
-    ]
-    environment:
-      PG_DSN: ${PG_DSN}
-    volumes:
-      - ./migrations:/migrations
-    depends_on:
-      - db
-
-
 networks:
   app-network:
     driver: bridge

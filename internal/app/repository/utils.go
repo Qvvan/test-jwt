@@ -1,68 +1,59 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/doug-martin/goqu/v9"
-	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v4/pgxpool"
-	errors "github.com/qvvan/test-jwt/pkg/client/postgresql/utils"
+	"github.com/jmoiron/sqlx"
 )
 
+const (
+	pgErrDuplicateCode = "SQLSTATE 23505"
+)
+
+var ErrDuplicate = errors.New("duplicate record")
+
 type BaseRepo struct {
-	db    *pgxpool.Pool
+	db    *sqlx.DB
 	table string
 }
 
-func (r *BaseRepo) create(ctx *gin.Context, newModel interface{}) (string, *errors.CustomError) {
-	query, _, err := goqu.Insert(r.table).Rows(newModel).Returning("id").ToSQL()
-	if err != nil {
-		return "", errors.NewQueryError(r.table, "query build", err)
-	}
+func (r *BaseRepo) getQuery(id string) (string, error) {
+	qb := goqu.From(r.table)
+	qb = qb.Where(goqu.I("id").Eq(id))
 
-	var id string
-	if err := r.db.QueryRow(ctx, query).Scan(&id); err != nil {
-		parsedErr := errors.ParsePostgresError(err)
-		return "", errors.NewCreateError(r.table, "scan result", parsedErr)
-	}
-
-	return id, nil
-}
-
-func (r *BaseRepo) getQuery(id string) (string, *errors.CustomError) {
-	qb := goqu.From(r.table).Where(goqu.I("id").Eq(id))
 	query, _, err := qb.ToSQL()
 	if err != nil {
-		return "", errors.NewQueryError(r.table, "query build for get", err)
+		return "", fmt.Errorf("can't build query to get: %w", err)
 	}
+
 	return query, nil
 }
 
-func (r *BaseRepo) GetID(ctx *gin.Context, id string, newModel interface{}) *errors.CustomError {
-	query, err := r.getQuery(id)
+func (r *BaseRepo) GetID(id string, getModel interface{}) error {
+	q, err := r.getQuery(id)
 	if err != nil {
 		return err
 	}
-
-	if err := r.db.QueryRow(ctx, query).Scan(&newModel); err != nil {
-		parsedErr := errors.ParsePostgresError(err)
-		return errors.NewCreateError(r.table, "scan result", parsedErr)
+	if err := r.db.Get(getModel, q); err != nil {
+		return fmt.Errorf("can't get model: %w", err)
 	}
 
 	return nil
 }
 
-func (r *BaseRepo) update(ctx *gin.Context, updateModel interface{}, id string) error {
+func (r *BaseRepo) update(updateModel interface{}, id string) error {
 	qu, _, err := goqu.Update(r.table).Set(
 		updateModel,
 	).Returning("id").Where(goqu.I("id").Eq(id)).ToSQL()
 	if err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(ctx, qu); err != nil {
-		if strings.Contains(err.Error(), errors.PGErrDuplicateCode) {
-			return errors.ErrDuplicate
+	if _, err := r.db.Exec(qu); err != nil {
+		if strings.Contains(err.Error(), pgErrDuplicateCode) {
+			return ErrDuplicate
 		}
 		return fmt.Errorf("error can't update updateModel %w", err)
 	}
